@@ -148,12 +148,28 @@ class Vocab(object):
         with open(embedding_path, 'r') as fin:
             for line in fin:
                 contents = line.strip().split()
-                token = contents[0].decode('utf8')
+                # token = contents[0].decode('utf8')
+
+                token = contents[0]
+                #  If the token is not in vocab, don't embedding its vector.
                 if token not in self.token2id:
                     continue
+                # the rest of the embedding line is the float-point vector
+
+                #  Wraps map() in a list call.  It also changes map(None, x) to
+                #  list(x).
+
+                #  TODO: Figure out why the embeddings in vocab file is binary,
+                #        instead of text.
                 trained_embeddings[token] = list(map(float, contents[1:]))
+
+                #  trained_embeddings[token] = list(contents[1:])
+
+                #  in cc.zh.300.vec its dimension is 300
+                #  in wiki.zh.vec its dimension is 100
                 if self.embed_dim is None:
                     self.embed_dim = len(contents) - 1
+
         filtered_tokens = trained_embeddings.keys()
         # rebuild the token x id map
         self.token2id = {}

@@ -1,4 +1,4 @@
-# -*- coding:utf8 -*-
+# -*- coding:utf-8 -*-
 # ==============================================================================
 # Copyright 2017 Baidu.com, Inc. All Rights Reserved
 #
@@ -98,8 +98,11 @@ def parse_args():
                                help='the dir to output the results')
     path_settings.add_argument('--summary_dir', default='../data/summary/',
                                help='the dir to write tensorboard summary')
-    path_settings.add_argument('--log_path',
+    # path_settings.add_argument('--log_path',
+    #                            help='path of the log file. If not set, logs are printed to console')
+    path_settings.add_argument('--log_path', default='../data/log',
                                help='path of the log file. If not set, logs are printed to console')
+
     return parser.parse_args()
 
 
@@ -108,8 +111,10 @@ def prepare(args):
     checks data, creates the directories, prepare the vocabulary and embeddings
     """
     logger = logging.getLogger("brc")
+
     logger.info('Checking the data files...')
     for data_path in args.train_files + args.dev_files + args.test_files:
+        # print(data_path)
         assert os.path.exists(data_path), '{} file does not exist.'.format(data_path)
     logger.info('Preparing the directories...')
     for dir_path in [args.vocab_dir, args.model_dir, args.result_dir, args.summary_dir]:
@@ -130,7 +135,13 @@ def prepare(args):
                                                                             vocab.size()))
 
     logger.info('Assigning embeddings...')
-    vocab.randomly_init_embeddings(args.embed_size)
+    #  vocab.randomly_init_embeddings(args.embed_size)
+
+    ###
+    #  using fasttext pre_train_embeddings, number * 300 vectors
+    vocab.load_pretrained_embeddings("fasttext_embeddings/cc.zh.300.vec")
+    #  using wiki.zh.vec number * 100 vectors.
+    #  vocab.load_pretrained_embeddings("fasttext_embeddings/wiki.zh.vec")
 
     logger.info('Saving vocab...')
     with open(os.path.join(args.vocab_dir, 'vocab.data'), 'wb') as fout:
@@ -241,6 +252,7 @@ def run():
         evaluate(args)
     if args.predict:
         predict(args)
+
 
 if __name__ == '__main__':
     run()
