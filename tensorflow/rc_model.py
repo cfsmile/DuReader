@@ -116,6 +116,7 @@ class RCModel(object):
         # and biases(B) for model, whereas tf.placeholder is used to feed
         # actual training examples.
         # haliluya
+        self.abc = 0
         self.p = tf.placeholder(tf.int32, [None, None])
         self.q = tf.placeholder(tf.int32, [None, None])
         self.p_length = tf.placeholder(tf.int32, [None])
