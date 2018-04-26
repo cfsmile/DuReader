@@ -51,6 +51,7 @@ class RCModel(object):
         self.optim_type = args.optim
         self.learning_rate = args.learning_rate
         self.weight_decay = args.weight_decay
+        #  use_dropout is a boolean
         self.use_dropout = args.dropout_keep_prob < 1
 
         # length limit
@@ -63,8 +64,23 @@ class RCModel(object):
         self.vocab = vocab
 
         # session info
+
+        #  The ConfigProto protocol buffer exposes various configuration options
+        #  for a session.
         sess_config = tf.ConfigProto()
+
+        #  In TF, 'GUPOptions gpu_options = 6' is one of the options that
+        #  apply to all GPUs.
+        #  'bool allow_growth = 4'
+        #  If true, the allocator does not pre-allocate the entire specified
+        #  GPU memory region, instead starting small and growing as needed.
         sess_config.gpu_options.allow_growth = True
+
+        #  A Session object encapsulates the environment in which Operation
+        #  objects are executed, and Tensor objects are evaluated.
+        #  A session may own resources.  It is important to release these
+        #  resources.  To do this, either invoke the tf.Session.close method
+        #  on the session, or use the session as a context manager.
         self.sess = tf.Session(config=sess_config)
 
         self._build_graph()
@@ -96,6 +112,10 @@ class RCModel(object):
         """
         Placeholders
         """
+        # tf.Variable is used for trainable variables such as weights(W)
+        # and biases(B) for model, whereas tf.placeholder is used to feed
+        # actual training examples.
+        # haliluya
         self.p = tf.placeholder(tf.int32, [None, None])
         self.q = tf.placeholder(tf.int32, [None, None])
         self.p_length = tf.placeholder(tf.int32, [None])
@@ -108,14 +128,40 @@ class RCModel(object):
         """
         The embedding layer, question and passage share embeddings
         """
+        # tf.device is a wrapper for Graph.device() using the default graph.
+        # Graph.device() returns a context manager that specifies the default
+        # device (such as '/device:GPU:0' or '/cpu:0') to use.
+        # tf.variable_scope
+
+        # Variable scope object to carry defaults to provide to get_variable.
+        # Many of the arguments we need for get_variable in a variable store are
+        # most easily handled with a context.  This object is used for the
+        # defaults.
         with tf.device('/cpu:0'), tf.variable_scope('word_embedding'):
+            #  Gets an existing variable with these parameters or create a new
+            #  one.  This function prefixes the name with the current variable
+            #  scope and perform reuse checks.
             self.word_embeddings = tf.get_variable(
-                'word_embeddings',
+                'word_embeddings',  # name
                 shape=(self.vocab.size(), self.vocab.embed_dim),
+                # shape:    rows               columns
                 initializer=tf.constant_initializer(self.vocab.embeddings),
+                #  Inherits from: Initializer. Initializer that generates
+                # tensors with constant values.
                 trainable=True
             )
-            self.p_emb = tf.nn.embedding_lookup(self.word_embeddings, self.p)
+
+            # Looks up ids in a list of embedding tensors.
+            # Returns a tensor with the same type as the tensors in params.
+            self.p_emb = tf.nn.embedding_lookup(self.word_embeddings,
+                                                # params: A single tensor
+                                                # representing the complete
+                                                # embedding tensor.
+                                                self.p
+                                                # ids: A tensor with type int32
+                                                # or int64 containing the ids
+                                                #  to be looked up in params.
+                                                )
             self.q_emb = tf.nn.embedding_lookup(self.word_embeddings, self.q)
 
     def _encode(self):
@@ -123,11 +169,29 @@ class RCModel(object):
         Employs two Bi-LSTMs to encode passage and question separately
         """
         with tf.variable_scope('passage_encoding'):
-            self.sep_p_encodes, _ = rnn('bi-lstm', self.p_emb, self.p_length, self.hidden_size)
+            ################
+            self.sep_p_encodes, _ = rnn('bi-lstm',   # rnn_type
+                                        self.p_emb,  # inputs
+                                        self.p_length,  # length
+                                        self.hidden_size  # hidden_size
+                                        )
         with tf.variable_scope('question_encoding'):
-            self.sep_q_encodes, _ = rnn('bi-lstm', self.q_emb, self.q_length, self.hidden_size)
+            self.sep_q_encodes, _ = rnn('bi-lstm',
+                                        self.q_emb,
+                                        self.q_length,
+                                        self.hidden_size)
         if self.use_dropout:
-            self.sep_p_encodes = tf.nn.dropout(self.sep_p_encodes, self.dropout_keep_prob)
+            # With probability keep_prob, outputs the input elements scaled
+            # up by 1 / keep_prob, otherwise outptus 0.
+            # By default, each element is kept or dropped independently.
+            self.sep_p_encodes = tf.nn.dropout(self.sep_p_encodes,
+                                               # x: A floating point tensor
+                                               self.dropout_keep_prob
+                                               # keep_prob: A scalar tensor
+                                               # with the same type as x. The
+                                               #  probability that each
+                                               # element is kept.
+                                               )
             self.sep_q_encodes = tf.nn.dropout(self.sep_q_encodes, self.dropout_keep_prob)
 
     def _match(self):
@@ -137,9 +201,11 @@ class RCModel(object):
         if self.algo == 'MLSTM':
             match_layer = MatchLSTMLayer(self.hidden_size)
         elif self.algo == 'BIDAF':
+            # We use this
             match_layer = AttentionFlowMatchLayer(self.hidden_size)
         else:
             raise NotImplementedError('The algorithm {} is not implemented.'.format(self.algo))
+
         self.match_p_encodes, _ = match_layer.match(self.sep_p_encodes, self.sep_q_encodes,
                                                     self.p_length, self.q_length)
         if self.use_dropout:
@@ -174,7 +240,10 @@ class RCModel(object):
             )[0:, 0, 0:, 0:]
         decoder = PointerNetDecoder(self.hidden_size)
         self.start_probs, self.end_probs = decoder.decode(concat_passage_encodes,
-                                                          no_dup_question_encodes)
+                                                          # passage_vectors
+                                                          no_dup_question_encodes
+                                                          # question_vectors
+                                                          )
 
     def _compute_loss(self):
         """
@@ -186,30 +255,60 @@ class RCModel(object):
             negative log likelyhood loss
             """
             with tf.name_scope(scope, "log_loss"):
-                labels = tf.one_hot(labels, tf.shape(probs)[1], axis=1)
+                # tf.one_hot returns a one-hot tensor
+                labels = tf.one_hot(labels,  # indices
+                                    tf.shape(probs)[1],  # depth
+                                    axis=1)
                 losses = - tf.reduce_sum(labels * tf.log(probs + epsilon), 1)
             return losses
 
         self.start_loss = sparse_nll_loss(probs=self.start_probs, labels=self.start_label)
         self.end_loss = sparse_nll_loss(probs=self.end_probs, labels=self.end_label)
+        # tf.trainable_variables() returns all variables created with
+        # trainable=True
+        # When passed trainable=True, the Variable() constructor
+        # automatically adds new variables to the graph collection GraphKeys.
+        #  TRAINABLE_VARIABLES. This convenience function returns the
+        # contents of that collection.
+        # returns a list of Variable objects.
         self.all_params = tf.trainable_variables()
+        # tf.reduce_mean computes the mean of elements across dimensions of a
+        #  tensor
+        # tf.add returns x + y element-wise
         self.loss = tf.reduce_mean(tf.add(self.start_loss, self.end_loss))
         if self.weight_decay > 0:
             with tf.variable_scope('l2_loss'):
+                # tf.add_n adds all input tensors element-wise
+                # tf.nn.l2_loss Computes half the L2 norm of a tensor without
+                #  the sqrt
+                # output = sum(t**2)/2
                 l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in self.all_params])
             self.loss += self.weight_decay * l2_loss
 
     def _create_train_op(self):
         """
         Selects the training algorithm and creates a train operation with it
+
+        All the algorithms mentioned have papers' references in tensorflow's
+        API r1.7.
+        The `minimize` methods of these algorithms have their own method
+        signature, computing processes and returns.
         """
         if self.optim_type == 'adagrad':
             self.optimizer = tf.train.AdagradOptimizer(self.learning_rate)
+            # tf.train.AdagradOptimizer is an optimizer that implements the
+            # Adagrad glorithm
         elif self.optim_type == 'adam':
+            # tf.train.AdamOptimizer is an optimizer that implements the Adam
+            #  algorithm
             self.optimizer = tf.train.AdamOptimizer(self.learning_rate)
         elif self.optim_type == 'rprop':
+            # tf.train.RMSPropOptimizer is an optimizer that implements the
+            # RMSProp algorithm
             self.optimizer = tf.train.RMSPropOptimizer(self.learning_rate)
         elif self.optim_type == 'sgd':
+            # tf.train.GradientDescentOptimizer is an optimizer that
+            # implements the gradient descent algorithm
             self.optimizer = tf.train.GradientDescentOptimizer(self.learning_rate)
         else:
             raise NotImplementedError('Unsupported optimizer: {}'.format(self.optim_type))
@@ -232,7 +331,21 @@ class RCModel(object):
                          self.start_label: batch['start_id'],
                          self.end_label: batch['end_id'],
                          self.dropout_keep_prob: dropout_keep_prob}
-            _, loss = self.sess.run([self.train_op, self.loss], feed_dict)
+            # tf.Session.run() runs operations and evaluates tensors in
+            # `fetches`.
+            # The fetches argument may be a single graph element,
+            # or an arbitrarily nested list, tuple, named tuple, dict,
+            # or OrderedDict containing graph elements at its leaves. A graph
+            # element can be one of the following types:...
+            # The value returned by run() has the same shape as the fetches
+            # argument, where the leaves are replaced by the corresponding
+            # values returned by TensorFlow.
+            # feed_dict: A dictionary that maps graph elements to values.
+            # Each value in feed_dict must be convertible to a numpy array of
+            #  the dtype of the corresponding key.
+            _, loss = self.sess.run([self.train_op, self.loss],  # fetches
+                                    feed_dict
+                                    )
             total_loss += loss * len(batch['raw_data'])
             total_num += len(batch['raw_data'])
             n_batch_loss += loss

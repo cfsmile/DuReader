@@ -45,6 +45,10 @@ class Vocab(object):
         if filename is not None:
             self.load_from_file(filename)
 
+        # with open("a.txt", 'w') as tmp:
+        #     tmp.write(str(self.initial_tokens))
+        # initial_tokens is ['<blank>', '<unk>']
+
     def size(self):
         """
         get the size of vocabulary
@@ -101,6 +105,9 @@ class Vocab(object):
         if token in self.token2id:
             idx = self.token2id[token]
         else:
+            # What on earth does this do. Using len as on entity as an
+            # index(idx) to id2token
+            #
             idx = len(self.id2token)
             self.id2token[idx] = token
             self.token2id[token] = idx

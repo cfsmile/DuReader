@@ -31,6 +31,8 @@ from dataset import BRCDataset
 from vocab import Vocab
 from rc_model import RCModel
 
+# for test
+import json
 
 def parse_args():
     """
@@ -124,9 +126,20 @@ def prepare(args):
     logger.info('Building vocabulary...')
     brc_data = BRCDataset(args.max_p_num, args.max_p_len, args.max_q_len,
                           args.train_files, args.dev_files, args.test_files)
+    # train_files etc. are treated as a list of files, in dataset.py
+    # BRCDataset __init__ methods.
+    # brc_data is an instance of BRCDataset class
+    # with open("a.txt", 'w') as tmp:
+    #     tmp.write(str(brc_data.train_set))
+
+
     vocab = Vocab(lower=True)
     for word in brc_data.word_iter('train'):
         vocab.add(word)
+    # with open("a.txt", 'w') as tmp:
+        # tmp.write(str(vocab.token2id))
+
+
 
     unfiltered_vocab_size = vocab.size()
     vocab.filter_tokens_by_cnt(min_cnt=2)
@@ -135,17 +148,23 @@ def prepare(args):
                                                                             vocab.size()))
 
     logger.info('Assigning embeddings...')
-    #  vocab.randomly_init_embeddings(args.embed_size)
+    vocab.randomly_init_embeddings(args.embed_size)
 
     ###
     #  using fasttext pre_train_embeddings, number * 300 vectors
-    vocab.load_pretrained_embeddings("fasttext_embeddings/cc.zh.300.vec")
+    #  vocab.load_pretrained_embeddings("fasttext_embeddings/cc.zh.300.vec")
     #  using wiki.zh.vec number * 100 vectors.
     #  vocab.load_pretrained_embeddings("fasttext_embeddings/wiki.zh.vec")
 
     logger.info('Saving vocab...')
+    # the mode 'wb' outputs file as binary
+    # dump vocab instance as vocab.data in binary format.
     with open(os.path.join(args.vocab_dir, 'vocab.data'), 'wb') as fout:
         pickle.dump(vocab, fout)
+
+    with open("a.txt", 'w') as tmp:
+        # tmp.write(str(vocab.token2id))
+        tmp.write(str(vocab.embeddings))
 
     logger.info('Done with preparing!')
 
@@ -245,6 +264,7 @@ def run():
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
 
     if args.prepare:
+        # --prepare is an optional argument which is default to True.
         prepare(args)
     if args.train:
         train(args)

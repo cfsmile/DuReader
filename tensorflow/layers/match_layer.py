@@ -19,15 +19,31 @@ This module implements the core layer of Match-LSTM and BiDAF
 """
 
 import tensorflow as tf
+#  contrib module containing volatile or experimental code
+#  tf.contrib.rnn, module: RNN Cells and addition RNN operations
 import tensorflow.contrib as tc
 
 
 class MatchLSTMAttnCell(tc.rnn.LSTMCell):
+    #  LSTMCel inherits from LayerRNNCell. The class uses optional peep-hole
+    # connections, optional cell clipping, and and an optional projection
+    # layer.
     """
     Implements the Match-LSTM attention cell
     """
     def __init__(self, num_units, context_to_attend):
-        super(MatchLSTMAttnCell, self).__init__(num_units, state_is_tuple=True)
+        # Call parent class LSTMCell __init__ to initialize the parameters
+        # for an LSTM cell.
+        super(MatchLSTMAttnCell, self).__init__(num_units,
+                                                # int,
+                                                # The number of units in the
+                                                # LSTM cell.
+                                                state_is_tuple=True
+                                                # If True, accepted and
+                                                # returned states are
+                                                # 2-tuples of the c_state and
+                                                #  m_state.
+                                                )
         self.context_to_attend = context_to_attend
         self.fc_context = tc.layers.fully_connected(self.context_to_attend,
                                                     num_outputs=self._num_units,
@@ -89,12 +105,71 @@ class AttentionFlowMatchLayer(object):
         Match the passage_encodes with question_encodes using Attention Flow Match algorithm
         """
         with tf.variable_scope('bidaf'):
-            sim_matrix = tf.matmul(passage_encodes, question_encodes, transpose_b=True)
-            context2question_attn = tf.matmul(tf.nn.softmax(sim_matrix, -1), question_encodes)
-            b = tf.nn.softmax(tf.expand_dims(tf.reduce_max(sim_matrix, 2), 1), -1)
+            #  tf.matmul multiplies matrix a by matrix b, producing a*b
+            sim_matrix = tf.matmul(passage_encodes,  # a
+                                   question_encodes,  # b
+                                   transpose_b=True
+                                   # b is transposed before multiplication
+                                   )
+            # tf.nn.softmax computes softmax activations
+            context2question_attn = tf.matmul(tf.nn.softmax(sim_matrix,
+                                                            # logits: A
+                                                            # non-empty Tensor
+                                                            -1
+                                                            # axis: The
+                                                            # dimension
+                                                            # softmax would
+                                                            # be performed
+                                                            # on. The default
+                                                            #  is -1 which
+                                                            # indicates the
+                                                            # last dimension.
+                                                            ),  # a for matmul
+                                              question_encodes  # b for matmul
+                                              )
+            # tf.expand_dims inserts a dimension of 1 into a tensor's shape
+            # This ops is useful if you want to add a BATCH dimension to a
+            # single element.
+            # This ops is related to squeeze(), which removes dimensions of
+            # size 1.
+
+            # tf.reduce_max computes the maximum of elements across
+            # dimensions of a tensor
+            b = tf.nn.softmax(tf.expand_dims(tf.reduce_max(sim_matrix,
+                                                           # input_tensor for
+                                                           #  reduce_max
+                                                           2
+                                                           # axis for
+                                                           # reduce_max
+                                                           ),
+                                             # input for expand_dims
+                                             1
+                                             # axis for expand_dims
+                                             ),
+                              # logits for softmax
+                              -1
+                              # axis for softmax
+                              )
+
+            # tf.tile constructs a tensor by tiling a given tensor.  This ops
+            #  creates a new tensor by replicating input 'multiples' times.
             question2context_attn = tf.tile(tf.matmul(b, passage_encodes),
-                                         [1, tf.shape(passage_encodes)[1], 1])
+                                            # input
+                                         [1, tf.shape(passage_encodes)[1], 1]
+                                         # A tensor. Length must be the same
+                                         # as the number of dimensions in input
+                                            )
+            # tf.concat concatenates tensors along one dimension.  That is,
+            # the data from the input tensors is joined along the axis
+            # dimension.
+            # The number of dimensions of the input tensors must match,
+            # and all dimensions except axis must be equal.
             concat_outputs = tf.concat([passage_encodes, context2question_attn,
                                         passage_encodes * context2question_attn,
-                                        passage_encodes * question2context_attn], -1)
+                                        passage_encodes * question2context_attn],
+                                       # values: a list of Tensor objects or
+                                       # a single Tensor
+                                       -1
+                                       # axis
+                                       )
             return concat_outputs, None

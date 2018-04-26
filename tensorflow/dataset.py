@@ -65,8 +65,12 @@ class BRCDataset(object):
                 if train:
                     if len(sample['answer_spans']) == 0:
                         continue
+                        # Ignore this line of json data and move
+                        # to next line of data.
                     if sample['answer_spans'][0][1] >= self.max_p_len:
                         continue
+                        # Same as above.
+                        # continue is equivalent of break/resume in loop
 
                 if 'answer_docs' in sample:
                     sample['answer_passages'] = sample['answer_docs']
@@ -81,6 +85,8 @@ class BRCDataset(object):
                             {'passage_tokens': doc['segmented_paragraphs'][most_related_para],
                              'is_selected': doc['is_selected']}
                         )
+                        #  The train dataset extracts 'segmented_question' as
+                        #  question_tokens, and passage_tokens etc. as passages.
                     else:
                         para_infos = []
                         for para_tokens in doc['segmented_paragraphs']:
@@ -195,6 +201,9 @@ class BRCDataset(object):
                 sample['question_token_ids'] = vocab.convert_to_ids(sample['question_tokens'])
                 for passage in sample['passages']:
                     passage['passage_token_ids'] = vocab.convert_to_ids(passage['passage_tokens'])
+
+                with open('b.txt', 'w') as tmp:
+                    tmp.write(str(sample))
 
     def gen_mini_batches(self, set_name, batch_size, pad_id, shuffle=True):
         """

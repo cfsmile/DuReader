@@ -40,13 +40,24 @@ def custom_dynamic_rnn(cell, inputs, inputs_len, initial_state=None):
     batch_size = tf.shape(inputs)[0]
     max_time = tf.shape(inputs)[1]
 
+    # tf.TensorArray is a class wrapping dynamic-sized, per-time-step,
+    # write-once Tensor arrays.
+    # This class is meant to be used with dynamic iteration primitives such
+    # as while_loop and map_fn.  It supports gradient back-propagation via
+    # special 'flow' control flow dependencies.
     inputs_ta = tf.TensorArray(dtype=tf.float32, size=max_time)
+    # tf.TensorArray.unstack(value, name=None) unstacks the values of a
+    # Tensor in the TensorArray.
     inputs_ta = inputs_ta.unstack(tf.transpose(inputs, [1, 0, 2]))
     emit_ta = tf.TensorArray(dtype=tf.float32, dynamic_size=True, size=0)
     t0 = tf.constant(0, dtype=tf.int32)
     if initial_state is not None:
         s0 = initial_state
     else:
+        # zero_state is a method of Class AttentionCellWrapper
+        # It is a basic attention cell wrapper.
+        # Implementation based on https://arxiv.org/abs/1409.0473
+        # It returns zero-flled state tensor(s).
         s0 = cell.zero_state(batch_size, dtype=tf.float32)
     f0 = tf.zeros([batch_size], dtype=tf.bool)
 
@@ -56,9 +67,19 @@ def custom_dynamic_rnn(cell, inputs, inputs_len, initial_state=None):
         """
         cur_x = inputs_ta.read(t)
         scores, cur_state = cell(cur_x, prev_s)
+        # the 'cell' is a object constructor. The class seems to be
+        # AttentionCellWrapper.
 
         # copy through
-        scores = tf.where(finished, tf.zeros_like(scores), scores)
+        # tf.where returns the elements, either from x or y, depending on the
+        #  'condition'
+        # The 'condition' tensor acts as a mask that chooses, based on the
+        # value at each element, whether the corresponding element/row in the
+        #  output should be taken from x(if true) or y(if false).
+        scores = tf.where(finished,  # condition
+                          tf.zeros_like(scores),  # x
+                          scores  # y
+                          )
 
         if isinstance(cell, tc.rnn.LSTMCell):
             cur_c, cur_h = cur_state
@@ -72,10 +93,28 @@ def custom_dynamic_rnn(cell, inputs, inputs_len, initial_state=None):
         finished = tf.greater_equal(t + 1, inputs_len)
         return [t + 1, cur_state, emit_ta, finished]
 
+    # Repeat 'body' while the condition 'cond' is true
+    # while_loop calls cond and body exactly once(inside the call to
+    # while_loop, and not at all during Session.run().  while_loop stitches
+    # together the graph fragments created during the cond and body calls
+    # with some additional graph nodes to create the graph flow that repeats
+    # body until cond returns false.
+    # The output tensors for the loop variables after the loop.  When the
+    # length of loop_vars is 1 this is a Tensor, TensorArray or IndexedSlice
+    # and when the length of loop_vars is greater than 1 it returns a list.
     _, state, emit_ta, _ = tf.while_loop(
+        # cond is a callable returning a boolean scalar tensor.
         cond=lambda _1, _2, _3, finished: tf.logical_not(tf.reduce_all(finished)),
+        # tf.reduce_all computes the 'logical and' of elements across dimensions
+        # tf.logical_not returns the truth value of NOT x element-wise.
         body=loop_fn,
+        #  body is a callable returning a (possibly nested) tuple, namedtuple or
+        #  list of tensors of the same arity(length and structure) and types
+        #  as loop_vars
         loop_vars=(t0, s0, emit_ta, f0),
+        # loop_vars is a (possibly nested) tuple, namedtuple or list of
+        # tensors that is passed to both cond and body.  cond and body both
+        # take as many arguments as there are loop_vars.
         parallel_iterations=32,
         swap_memory=False)
 
@@ -94,6 +133,8 @@ def attend_pooling(pooling_vectors, ref_vector, hidden_size, scope=None):
     Returns:
         the pooled vector
     """
+
+    # What does polling mean?
     with tf.variable_scope(scope or 'attend_pooling'):
         U = tf.tanh(tc.layers.fully_connected(pooling_vectors, num_outputs=hidden_size,
                                               activation_fn=None, biases_initializer=None)
@@ -102,6 +143,7 @@ def attend_pooling(pooling_vectors, ref_vector, hidden_size, scope=None):
                                                 activation_fn=None))
         logits = tc.layers.fully_connected(U, num_outputs=1, activation_fn=None)
         scores = tf.nn.softmax(logits, 1)
+        # reduce_sum computes the sum of elements across dimensions of a tensor.
         pooled_vector = tf.reduce_sum(pooling_vectors * scores, axis=1)
     return pooled_vector
 
@@ -155,16 +197,28 @@ class PointerNetDecoder(object):
             fake_inputs = tf.zeros([tf.shape(passage_vectors)[0], 2, 1])  # not used
             sequence_len = tf.tile([2], [tf.shape(passage_vectors)[0]])
             if init_with_question:
-                random_attn_vector = tf.Variable(tf.random_normal([1, self.hidden_size]),
+                # tf.random_normal outputs random values from anormal
+                # distribution
+                random_attn_vector = tf.Variable(tf.random_normal([1,
+                                                                   self.hidden_size] # shape
+                                                                  ),
                                                  trainable=True, name="random_attn_vector")
+                # tf.contrib.layers.fully_connected adds a fully connected
+                # layer.
                 pooled_question_rep = tc.layers.fully_connected(
                     attend_pooling(question_vectors, random_attn_vector, self.hidden_size),
-                    num_outputs=self.hidden_size, activation_fn=None
+                    # inputs
+                    num_outputs=self.hidden_size,
+                    activation_fn=None
                 )
+                # Tuple used by LSTM Cells for state_size, zero_state,
+                # and output state.  Stores two elements: (c, h), in that
+                # order. Where c is the hidden state and h is the output.
                 init_state = tc.rnn.LSTMStateTuple(pooled_question_rep, pooled_question_rep)
             else:
                 init_state = None
             with tf.variable_scope('fw'):
+                # PointerNetLSTMCell implements the Pointer Network Cell
                 fw_cell = PointerNetLSTMCell(self.hidden_size, passage_vectors)
                 fw_outputs, _ = custom_dynamic_rnn(fw_cell, fake_inputs, sequence_len, init_state)
             with tf.variable_scope('bw'):
