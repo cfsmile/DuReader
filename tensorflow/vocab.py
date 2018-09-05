@@ -97,7 +97,11 @@ class Vocab(object):
             token: a string
             cnt: a num indicating the count of the token to add, default is 1
         """
-        token = token.lower() if self.lower else token
+        # ---
+        # token = token.lower() if self.lower else token
+        if self.lower:
+            token = token.lower()
+        # ---    
         if token in self.token2id:
             idx = self.token2id[token]
         else:
